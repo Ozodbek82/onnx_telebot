@@ -102,111 +102,111 @@ def handle_video(message):
             # Process the video or perform any other desired action
             bot.reply_to(message, "Video received. Thank you!")
 
-        model_inputs = ort_session.get_inputs()
-        input_names = [model_inputs[i].name for i in range(len(model_inputs))]
-        input_shape = model_inputs[0].shape
+            model_inputs = ort_session.get_inputs()
+            input_names = [model_inputs[i].name for i in range(len(model_inputs))]
+            input_shape = model_inputs[0].shape
 
-        model_output = ort_session.get_outputs()
-        output_names = [model_output[i].name for i in range(len(model_output))]
-        CLASSES=["Face"]
-        conf_thresold = 0.6
+            model_output = ort_session.get_outputs()
+            output_names = [model_output[i].name for i in range(len(model_output))]
+            CLASSES=["Face"]
+            conf_thresold = 0.6
 
-        # Create the video folder if it doesn't exist
-        if not os.path.exists(VIDEO_FOLDER):
-            os.makedirs(VIDEO_FOLDER)
+            # Create the video folder if it doesn't exist
+            if not os.path.exists(VIDEO_FOLDER):
+                os.makedirs(VIDEO_FOLDER)
 
-        # Get the file info
-        file_info = bot.get_file(message.video.file_id)
-        file_path = file_info.file_path
+            # Get the file info
+            file_info = bot.get_file(message.video.file_id)
+            file_path = file_info.file_path
         
-        # Download the video
-        downloaded_file = bot.download_file(file_path)
-        msg=bot.reply_to(message, "video downloaded successfully")
-        # Save the video to the folder
-        video_filename = os.path.join(VIDEO_FOLDER, f"{message.video.file_id}.avi")
-        output_file = os.path.join(VIDEO_FOLDER, f"out{message.video.file_id}.avi")
+            # Download the video
+            downloaded_file = bot.download_file(file_path)
+            msg=bot.reply_to(message, "video downloaded successfully")
+            # Save the video to the folder
+            video_filename = os.path.join(VIDEO_FOLDER, f"{message.video.file_id}.avi")
+            output_file = os.path.join(VIDEO_FOLDER, f"out{message.video.file_id}.avi")
         
-        with open(video_filename, 'wb') as new_file:
-            new_file.write(downloaded_file)
+            with open(video_filename, 'wb') as new_file:
+                new_file.write(downloaded_file)
 
         
-        cap = cv2.VideoCapture(video_filename)
-        print(video_filename)
+            cap = cv2.VideoCapture(video_filename)
+            print(video_filename)
 
 
 
-        imageWidth = int(cap.get(3))
-        imageHeight = int(cap.get(4))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        freyms = int(cap.get(7))
-        #print("fourcc=",cap.get(cv2.CAP_PROP_BITRATE))
-        fourcc = cv2.VideoWriter_fourcc(*"DIVX")
-        out = cv2.VideoWriter(output_file, fourcc, fps, (imageWidth, imageHeight))
-        k=0
+            imageWidth = int(cap.get(3))
+            imageHeight = int(cap.get(4))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            freyms = int(cap.get(7))
+            #print("fourcc=",cap.get(cv2.CAP_PROP_BITRATE))
+            fourcc = cv2.VideoWriter_fourcc(*"DIVX")
+            out = cv2.VideoWriter(output_file, fourcc, fps, (imageWidth, imageHeight))
+            k=0
         
-        while True:
-            ret, frame = cap.read()
+            while True:
+                ret, frame = cap.read()
             
-            if not ret:
-                break
-            if k%2==0:
-              k+=1
-              continue
-            k+=1
+                if not ret:
+                    break
+                if k%2==0:
+                  k+=1
+                  continue
+                k+=1
+                try:
+                    if int(k/freyms*100)%10==0:
+                        bot.edit_message_text(f"{int(k/freyms*100)} % completed...", msg.chat.id, msg.message_id)
+                except :
+                    pass
+                #frame=cv2.resize(frame, (640, 480),interpolation = cv2.INTER_AREA)
+                input_tensor, h, w = image_preprocessing(input_shape,frame)
+                output = ort_session.run(output_names, {input_names[0]: input_tensor})[0]
+
+                predictions = np.squeeze(output).T
+                scores = np.max(predictions[:, 4:], axis=1)
+                predictions = predictions[scores > conf_thresold, :]
+                scores = scores[scores > conf_thresold]
+
+                class_ids = np.argmax(predictions[:, 4:], axis=1)
+
+                boxes = predictions[:, :4]
+                input_shape = np.array([w, h, w, h])
+                boxes = np.divide(boxes, input_shape, dtype=np.float32)
+                boxes *= np.array([imageWidth, imageHeight, imageWidth, imageHeight])
+                boxes = boxes.astype(np.int32)
+                indices = nms(boxes, scores, 0.3)
+
+                image_draw = frame.copy()
+
+                for (bbox, score, label) in zip(xywh2xyxy(boxes[indices]), scores[indices], class_ids[indices]):
+
+                    bbox = bbox.round().astype(np.int32).tolist()
+                    cls_id = int(label)
+                    cls = CLASSES[cls_id]
+                    color = (0,255,0)
+                    cv2.rectangle(image_draw, tuple(bbox[:2]), tuple(bbox[2:]), color, 2)
+                out.write(image_draw)
+
+            bot.edit_message_text(f"the process is completed", msg.chat.id, msg.message_id)
+            cap.release()
+            out.release()
+            # Send a confirmation message
+            #res = bot.reply_to(message, "Loading result...")
+
+            # Send the video back to the user
             try:
-                if int(k/freyms*100)%10==0:
-                    bot.edit_message_text(f"{int(k/freyms*100)} % completed...", msg.chat.id, msg.message_id)
-            except :
-                pass
-            #frame=cv2.resize(frame, (640, 480),interpolation = cv2.INTER_AREA)
-            input_tensor, h, w = image_preprocessing(input_shape,frame)
-            output = ort_session.run(output_names, {input_names[0]: input_tensor})[0]
-
-            predictions = np.squeeze(output).T
-            scores = np.max(predictions[:, 4:], axis=1)
-            predictions = predictions[scores > conf_thresold, :]
-            scores = scores[scores > conf_thresold]
-
-            class_ids = np.argmax(predictions[:, 4:], axis=1)
-
-            boxes = predictions[:, :4]
-            input_shape = np.array([w, h, w, h])
-            boxes = np.divide(boxes, input_shape, dtype=np.float32)
-            boxes *= np.array([imageWidth, imageHeight, imageWidth, imageHeight])
-            boxes = boxes.astype(np.int32)
-            indices = nms(boxes, scores, 0.3)
-
-            image_draw = frame.copy()
-
-            for (bbox, score, label) in zip(xywh2xyxy(boxes[indices]), scores[indices], class_ids[indices]):
-
-                bbox = bbox.round().astype(np.int32).tolist()
-                cls_id = int(label)
-                cls = CLASSES[cls_id]
-                color = (0,255,0)
-                cv2.rectangle(image_draw, tuple(bbox[:2]), tuple(bbox[2:]), color, 2)
-            out.write(image_draw)
-
-        bot.edit_message_text(f"the process is completed", msg.chat.id, msg.message_id)
-        cap.release()
-        out.release()
-        # Send a confirmation message
-        #res = bot.reply_to(message, "Loading result...")
-
-        # Send the video back to the user
-        try:
-            with open(output_file, 'rb') as video_file:
-                bot.send_video(message.chat.id, video_file)
-        except Exception as er:            
-            bot.reply_to(message, f"{str(er)}")
-        # Delete the video file
-        os.remove(video_filename)
+                with open(output_file, 'rb') as video_file:
+                    bot.send_video(message.chat.id, video_file)
+            except Exception as er:            
+                bot.reply_to(message, f"{str(er)}")
+            # Delete the video file
+            os.remove(video_filename)
         
-        os.remove(output_file)
+            os.remove(output_file)
 
 
     except Exception as e:
-        bot.reply_to(message, f"The file size is a large, please send a smaller one: {str(e)}")
+        bot.reply_to(message, f"Something went wrong. Please send another video: {str(e)}")
     
 
 if __name__ == "__main__":
