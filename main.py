@@ -150,8 +150,8 @@ def handle_video(message):
                 if not ret:
                     break
                 if k%2==0:
-                  k+=1
-                  continue
+                    k+=1
+                    continue
                 k+=1
                 try:
                     if int(k/freyms*100)%10==0:
